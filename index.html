@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>3D Driving Map</title>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+      :root {
+        --panel-bg: rgba(16, 22, 30, 0.88);
+        --panel-bg-soft: rgba(16, 22, 30, 0.72);
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --text: #f2f5f8;
+        --text-dim: #aeb9c4;
+        --accent: #ff5a3c;
+        --accent-ink: #ffffff;
+        --field-bg: rgba(255, 255, 255, 0.1);
+        --chip-bg: rgba(255, 255, 255, 0.1);
+        --chip-bg-active: #ff5a3c;
+        --btn-bg: rgba(22, 30, 40, 0.88);
+        --btn-active: #ff5a3c;
+        --danger: #ffb4a6;
+        --ok: #8fe3b0;
+        --shadow: 0 10px 32px rgba(0, 0, 0, 0.42);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --panel-bg: rgba(255, 255, 255, 0.92);
+          --panel-bg-soft: rgba(255, 255, 255, 0.82);
+          --panel-border: rgba(15, 30, 45, 0.14);
+          --text: #14202c;
+          --text-dim: #54636f;
+          --field-bg: rgba(15, 30, 45, 0.07);
+          --chip-bg: rgba(15, 30, 45, 0.08);
+          --btn-bg: rgba(255, 255, 255, 0.92);
+          --shadow: 0 10px 32px rgba(20, 40, 60, 0.25);
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font-family: ui-sans-system, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+        overflow: hidden;
+        background: #0c1218;
+      }
+      button, input { min-height: 2.25rem; font: inherit; }
+      #map { position: fixed; inset: 0; }
+      #map .maplibregl-ctrl-attrib { font-size: 10px; }
+
+      /* ---------- top-left: address + presets ---------- */
+      .panel {
+        position: fixed;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(12px, env(safe-area-inset-left));
+        z-index: 10;
+        width: min(430px, calc(100vw - 24px));
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        padding: 14px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      .panel h1 {
+        margin: 0 0 2px;
+        font-size: 1.15rem;
+        letter-spacing: 0.01em;
+        font-weight: 800;
+      }
+      .panel .sub {
+        margin: 0 0 12px;
+        font-size: 0.83rem;
+        color: var(--text-dim);
+        line-height: 1.35;
+      }
+      .search-row { display: flex; gap: 8px; }
+      .search-row input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 1px solid var(--panel-border);
+        border-radius: 9px;
+        background: var(--field-bg);
+        color: var(--text);
+        padding: 8px 11px;
+        outline: none;
+      }
+      .search-row input::placeholder { color: var(--text-dim); }
+      .search-row input:focus { border-color: var(--accent); }
+      .go-btn {
+        flex: 0 0 auto;
+        border: 0;
+        border-radius: 9px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 700;
+        padding: 8px 18px;
+        cursor: pointer;
+      }
+      .go-btn:disabled { opacity: 0.55; cursor: wait; }
+      .status {
+        min-height: 1.15em;
+        margin: 8px 0 0;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+      }
+      .status.error { color: var(--danger); }
+      .status.ok { color: var(--ok); }
+      .presets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .presets .label {
+        width: 100%;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+      .chip {
+        border: 1px solid var(--panel-border);
+        background: var(--chip-bg);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        min-height: 2.25rem;
+      }
+      .chip:hover { border-color: var(--accent); }
+
+      /* ---------- top-right: view controls ---------- */
+      .view-controls {
+        position: fixed;
+        top: max(12px, env(safe-area-inset-top));
+        right: max(12px, env(safe-area-inset-right));
+        z-index: 10;
+        display: flex;
+        gap: 8px;
+      }
+      .seg {
+        display: flex;
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+      }
+      .seg button {
+        border: 0;
+        background: transparent;
+        color: var(--text-dim);
+        font-weight: 700;
+        font-size: 0.85rem;
+        padding: 8px 14px;
+        cursor: pointer;
+        min-width: 52px;
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      .follow-btn {
+        border: 1px solid var(--panel-border);
+        background: var(--panel-bg);
+        color: var(--text-dim);
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        padding: 8px 14px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+      }
+      .follow-btn[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+
+      /* ---------- speedometer ---------- */
+      .speedo {
+        position: fixed;
+        right: max(14px, env(safe-area-inset-right));
+        bottom: 118px;
+        z-index: 10;
+        background: var(--panel-bg-soft);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        padding: 10px 16px 8px;
+        text-align: center;
+        min-width: 108px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      .speedo .num {
+        font-size: 2.3rem;
+        font-weight: 800;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      .speedo .unit { font-size: 0.78rem; font-weight: 700; color: var(--text-dim); letter-spacing: 0.08em; }
+      .speedo .sub2 { font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; font-variant-numeric: tabular-nums; }
+      .speedo .bar {
+        height: 5px;
+        border-radius: 3px;
+        background: var(--field-bg);
+        margin-top: 8px;
+        overflow: hidden;
+      }
+      .speedo .bar > div {
+        height: 100%;
+        width: 0%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 80ms linear;
+      }
+
+      /* ---------- touch drive controls ---------- */
+      .drive-controls {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: max(14px, env(safe-area-inset-bottom));
+        z-index: 10;
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+      .drive-cluster { display: flex; gap: 10px; align-items: flex-end; }
+      .drive-btn {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        border: 1px solid var(--panel-border);
+        background: var(--btn-bg);
+        color: var(--text);
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        cursor: pointer;
+        touch-action: none;
+        padding: 0;
+      }
+      .drive-btn svg { width: 24px; height: 24px; fill: currentColor; }
+      .drive-btn .cap { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.07em; color: var(--text-dim); }
+      .drive-btn.active { background: var(--btn-active); color: #fff; }
+      .drive-btn.active .cap { color: rgba(255,255,255,0.85); }
+      .drive-btn.gas, .drive-btn.brake { height: 76px; }
+      .handbrake-btn {
+        width: 64px;
+        height: 48px;
+        border-radius: 12px;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+      }
+
+      /* ---------- help hint ---------- */
+      .hint {
+        position: fixed;
+        left: max(12px, env(safe-area-inset-left));
+        bottom: max(14px, env(safe-area-inset-bottom));
+        z-index: 9;
+        background: var(--panel-bg-soft);
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        line-height: 1.5;
+        max-width: 250px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .hint b { color: var(--text); font-weight: 700; }
+      @media (max-width: 760px) {
+        .hint { display: none; }
+        .speedo { bottom: 112px; min-width: 92px; padding: 8px 12px 7px; }
+        .speedo .num { font-size: 1.8rem; }
+        .panel { padding: 11px; }
+        .panel .sub { display: none; }
+        .drive-btn { width: 58px; height: 58px; }
+        .drive-btn.gas, .drive-btn.brake { height: 68px; }
+      }
+      @media (max-width: 430px) {
+        .panel { width: calc(100vw - 24px); }
+        .view-controls { top: auto; bottom: 196px; }
+        .speedo { bottom: 196px; }
+      }
+
+      /* ---------- fallback message ---------- */
+      .fallback {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: #0c1218;
+        color: #f2f5f8;
+        padding: 24px;
+        text-align: center;
+      }
+      .fallback.show { display: flex; }
+      .fallback p { max-width: 420px; line-height: 1.55; }
+    </style>
+  </head>
+  <body>
+    <div id="map" aria-label="3D map you can drive on"></div>
+
+    <section class="panel" aria-label="Find a place to drive">
+      <h1>Drive anywhere</h1>
+      <p class="sub">Type an address, drop the car there, and drive. Free driving — no need to stay on the roads.</p>
+      <form class="search-row" id="search-form">
+        <input id="address" type="text" autocomplete="street-address" placeholder="e.g. 201 E Abram St, Arlington, TX" aria-label="Address" />
+        <button class="go-btn" id="go-btn" type="submit">Drive</button>
+      </form>
+      <p class="status" id="status" role="status"></p>
+      <div class="presets">
+        <span class="label">Try a place</span>
+        <button class="chip" type="button" data-preset="arlington">Arlington, TX</button>
+        <button class="chip" type="button" data-preset="fortworth">Fort Worth</button>
+        <button class="chip" type="button" data-preset="timessquare">Times Square</button>
+        <button class="chip" type="button" data-preset="goldengate">Golden Gate Bridge</button>
+      </div>
+    </section>
+
+    <div class="view-controls">
+      <div class="seg" role="group" aria-label="Map view">
+        <button type="button" id="view-3d" aria-pressed="true">3D</button>
+        <button type="button" id="view-2d" aria-pressed="false">2D</button>
+      </div>
+      <button type="button" class="follow-btn" id="follow-btn" aria-pressed="true">Follow cam</button>
+    </div>
+
+    <div class="speedo" aria-label="Speedometer">
+      <div><span class="num" id="speed-num">0</span> <span class="unit">MPH</span></div>
+      <div class="bar"><div id="speed-bar"></div></div>
+      <div class="sub2"><span id="speed-kmh">0 km/h</span> · <span id="heading-label">N</span></div>
+    </div>
+
+    <div class="drive-controls" aria-label="Driving controls">
+      <div class="drive-cluster">
+        <button class="drive-btn" id="btn-left" aria-label="Steer left">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4.5 8 12l7.5 7.5 1.8-1.8L11.6 12l5.7-5.7z"/></svg>
+          <span class="cap">LEFT</span>
+        </button>
+        <button class="drive-btn" id="btn-right" aria-label="Steer right">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 4.5 16 12l-7.5 7.5-1.8-1.8L12.4 12 6.7 6.3z"/></svg>
+          <span class="cap">RIGHT</span>
+        </button>
+      </div>
+      <button class="drive-btn handbrake-btn" id="btn-handbrake" aria-label="Brake">BRAKE</button>
+      <div class="drive-cluster">
+        <button class="drive-btn brake" id="btn-brake" aria-label="Brake and reverse">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16.5 4.5 9l1.8-1.8L12 12.9l5.7-5.7L19.5 9z"/></svg>
+          <span class="cap">REV</span>
+        </button>
+        <button class="drive-btn gas" id="btn-gas" aria-label="Accelerate">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.5 19.5 15l-1.8 1.8L12 11.1l-5.7 5.7L4.5 15z"/></svg>
+          <span class="cap">GAS</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="hint">
+      <b>W / ↑</b> gas &nbsp; <b>S / ↓</b> brake &amp; reverse<br />
+      <b>A D / ← →</b> steer &nbsp; <b>Space</b> brake<br />
+      Drag to look around when Follow cam is off.
+    </div>
+
+    <div class="fallback" id="fallback">
+      <p><strong>The 3D map could not start.</strong><br />It needs WebGL and a network connection for map tiles. Try a recent desktop or phone browser, or check your connection and reload.</p>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script>
+      (function () {
+        'use strict';
+
+        var PRESETS = {
+          arlington:   { name: 'Downtown Arlington, TX', lng: -97.10810, lat: 32.73570, heading: 0 },
+          fortworth:   { name: 'Sundance Square, Fort Worth', lng: -97.33270, lat: 32.75320, heading: 0 },
+          timessquare: { name: 'Times Square, New York', lng: -73.98550, lat: 40.75800, heading: 0 },
+          goldengate:  { name: 'Golden Gate Bridge, San Francisco', lng: -122.47830, lat: 37.81990, heading: 350 }
+        };
+
+        var statusEl = document.getElementById('status');
+        function setStatus(msg, kind) {
+          statusEl.textContent = msg || '';
+          statusEl.className = 'status' + (kind ? ' ' + kind : '');
+        }
+
+        if (!window.maplibregl) {
+          document.getElementById('fallback').classList.add('show');
+          return;
+        }
+
+        /* ---------------- Car state ---------------- */
+        var car = {
+          lng: PRESETS.arlington.lng,
+          lat: PRESETS.arlington.lat,
+          heading: 0,          /* degrees, 0 = north, clockwise */
+          speed: 0             /* m/s, negative = reversing */
+        };
+        var input = { gas: false, brake: false, left: false, right: false, handbrake: false };
+        var viewMode = '3d';
+        var follow = true;
+
+        var MAX_FWD = 42;      /* ~94 mph */
+        var MAX_REV = 11;      /* ~25 mph */
+        var ACCEL = 14;
+        var REV_ACCEL = 8;
+        var BRAKE_DECEL = 30;
+
+        /* ---------------- Map ---------------- */
+        var map;
+        try {
+          map = new maplibregl.Map({
+            container: 'map',
+            style: 'https://tiles.openfreemap.org/styles/liberty',
+            center: [car.lng, car.lat],
+            zoom: 18,
+            pitch: 62,
+            bearing: 0,
+            antialias: true,
+            attributionControl: { compact: true }
+          });
+        } catch (e) {
+          document.getElementById('fallback').classList.add('show');
+          return;
+        }
+        map.on('error', function (e) {
+          if (e && e.error && /webgl/i.test(String(e.error.message || ''))) {
+            document.getElementById('fallback').classList.add('show');
+          }
+        });
+
+        /* ---------------- Car geometry ---------------- */
+        /* Build a rotated rectangle polygon (in lng/lat) centred on the car. */
+        function rectPolygon(lenM, widM, fwdOffsetM, headingDeg) {
+          var h = headingDeg * Math.PI / 180;
+          var fx = Math.sin(h), fy = Math.cos(h);   /* forward, east/north */
+          var rx = Math.cos(h), ry = -Math.sin(h);  /* right,   east/north */
+          var cx = car.lng, cy = car.lat;
+          var cosLat = Math.cos(cy * Math.PI / 180);
+          function pt(f, r) {
+            var east = fx * f + rx * r;
+            var north = fy * f + ry * r;
+            return [
+              cx + east / (111320 * cosLat),
+              cy + north / 111320
+            ];
+          }
+          var hl = lenM / 2, hw = widM / 2, o = fwdOffsetM;
+          return [[
+            pt(o + hl, -hw), pt(o + hl, hw), pt(o - hl, hw), pt(o - hl, -hw), pt(o + hl, -hw)
+          ]];
+        }
+        function carGeoJSON() {
+          return {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                properties: { part: 'shadow', height: 0, base: 0 },
+                geometry: { type: 'Polygon', coordinates: rectPolygon(4.9, 2.3, 0, car.heading) }
+              },
+              {
+                type: 'Feature',
+                properties: { part: 'body', height: 0.68, base: 0.18 },
+                geometry: { type: 'Polygon', coordinates: rectPolygon(4.4, 1.9, 0, car.heading) }
+              },
+              {
+                type: 'Feature',
+                properties: { part: 'cabin', height: 1.28, base: 0.62 },
+                geometry: { type: 'Polygon', coordinates: rectPolygon(2.3, 1.68, -0.25, car.heading) }
+              }
+            ]
+          };
+        }
+
+        var styleReady = false;
+        var buildingsLayerId = null;
+        function setupLayers() {
+          if (styleReady) return;
+          styleReady = true;
+
+          /* 3D buildings: the Liberty style ships its own fill-extrusion
+             building layer; use it when present, otherwise add one from the
+             same vector source, lifted under the labels. */
+          try {
+            if (map.getLayer('building-3d')) {
+              buildingsLayerId = 'building-3d';
+            } else {
+              var layers = map.getStyle().layers || [];
+              var labelLayer = null;
+              for (var i = 0; i < layers.length; i++) {
+                if (layers[i].type === 'symbol' && layers[i].layout && layers[i].layout['text-field']) {
+                  labelLayer = layers[i]; break;
+                }
+              }
+              var srcId = null;
+              var candidates = ['openmaptiles', 'maplibre'];
+              for (var j = 0; j < candidates.length; j++) {
+                if (map.getSource(candidates[j])) { srcId = candidates[j]; break; }
+              }
+              if (srcId) {
+                map.addLayer({
+                  id: 'buildings-3d',
+                  source: srcId,
+                  'source-layer': 'building',
+                  filter: ['!', ['has', 'hide_3d']],
+                  type: 'fill-extrusion',
+                  minzoom: 14,
+                  paint: {
+                    'fill-extrusion-color': '#aebfcc',
+                    'fill-extrusion-height': ['get', 'render_height'],
+                    'fill-extrusion-base': ['get', 'render_min_height'],
+                    'fill-extrusion-opacity': 0.85
+                  }
+                }, labelLayer ? labelLayer.id : undefined);
+                buildingsLayerId = 'buildings-3d';
+              }
+            }
+          } catch (e) { /* Buildings are a bonus; the drive still works without them. */ }
+
+          /* The car: shadow + extruded body + cabin. */
+          if (!map.getSource('car')) {
+            map.addSource('car', { type: 'geojson', data: carGeoJSON() });
+          }
+          if (!map.getLayer('car-shadow')) {
+            map.addLayer({
+              id: 'car-shadow', type: 'fill', source: 'car',
+              filter: ['==', ['get', 'part'], 'shadow'],
+              paint: { 'fill-color': '#000000', 'fill-opacity': 0.28 }
+            });
+          }
+          if (!map.getLayer('car-body')) {
+            map.addLayer({
+              id: 'car-body', type: 'fill-extrusion', source: 'car',
+              filter: ['==', ['get', 'part'], 'body'],
+              paint: {
+                'fill-extrusion-color': '#e8402a',
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'base'],
+                'fill-extrusion-opacity': 0.98
+              }
+            });
+          }
+          if (!map.getLayer('car-cabin')) {
+            map.addLayer({
+              id: 'car-cabin', type: 'fill-extrusion', source: 'car',
+              filter: ['==', ['get', 'part'], 'cabin'],
+              paint: {
+                'fill-extrusion-color': '#18242f',
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'base'],
+                'fill-extrusion-opacity': 0.98
+              }
+            });
+          }
+          applyViewMode();
+        }
+        map.on('load', setupLayers);
+        map.on('style.load', setupLayers);
+
+        /* ---------------- View mode / follow ---------------- */
+        var btn3d = document.getElementById('view-3d');
+        var btn2d = document.getElementById('view-2d');
+        var followBtn = document.getElementById('follow-btn');
+        function applyViewMode() {
+          btn3d.setAttribute('aria-pressed', viewMode === '3d' ? 'true' : 'false');
+          btn2d.setAttribute('aria-pressed', viewMode === '2d' ? 'true' : 'false');
+          if (buildingsLayerId && map.getLayer(buildingsLayerId)) {
+            map.setLayoutProperty(buildingsLayerId, 'visibility', viewMode === '3d' ? 'visible' : 'none');
+          }
+          if (!follow) {
+            map.easeTo({ pitch: viewMode === '3d' ? 62 : 0, bearing: viewMode === '3d' ? car.heading : 0, duration: 600 });
+          }
+        }
+        btn3d.addEventListener('click', function () { viewMode = '3d'; applyViewMode(); btn3d.blur(); });
+        btn2d.addEventListener('click', function () { viewMode = '2d'; applyViewMode(); btn2d.blur(); });
+        followBtn.addEventListener('click', function () {
+          follow = !follow;
+          followBtn.setAttribute('aria-pressed', follow ? 'true' : 'false');
+          followBtn.blur();
+        });
+
+        /* ---------------- Place the car ---------------- */
+        function placeCar(lng, lat, heading, label) {
+          car.lng = lng;
+          car.lat = lat;
+          car.heading = heading || 0;
+          car.speed = 0;
+          var src = map.getSource('car');
+          if (src) src.setData(carGeoJSON());
+          map.jumpTo({
+            center: [lng, lat],
+            pitch: viewMode === '3d' ? 62 : 0,
+            bearing: viewMode === '3d' ? car.heading : 0,
+            zoom: Math.max(map.getZoom(), 17.5)
+          });
+          if (label) setStatus('Car dropped at ' + label + '. Hit the gas!', 'ok');
+        }
+
+        /* Presets */
+        var chips = document.querySelectorAll('[data-preset]');
+        for (var c = 0; c < chips.length; c++) {
+          chips[c].addEventListener('click', function () {
+            var p = PRESETS[this.getAttribute('data-preset')];
+            if (p) placeCar(p.lng, p.lat, p.heading, p.name);
+            this.blur();
+          });
+        }
+
+        /* ---------------- Address search (OpenStreetMap Nominatim) ---------------- */
+        var form = document.getElementById('search-form');
+        var addressInput = document.getElementById('address');
+        var goBtn = document.getElementById('go-btn');
+        form.addEventListener('submit', function (ev) {
+          ev.preventDefault();
+          var q = addressInput.value.trim();
+          if (!q) { setStatus('Type an address first.', 'error'); return; }
+          goBtn.disabled = true;
+          setStatus('Finding ' + q + '…');
+          var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=0&q=' + encodeURIComponent(q);
+          fetch(url, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) {
+              if (!r.ok) throw new Error('search failed');
+              return r.json();
+            })
+            .then(function (results) {
+              goBtn.disabled = false;
+              if (!results || !results.length) {
+                setStatus('Could not find that address. Try adding the city and state.', 'error');
+                return;
+              }
+              var hit = results[0];
+              var label = (hit.display_name || q).split(',').slice(0, 2).join(',');
+              placeCar(parseFloat(hit.lon), parseFloat(hit.lat), 0, label);
+            })
+            .catch(function () {
+              goBtn.disabled = false;
+              setStatus('Address search failed — check your connection and try again.', 'error');
+            });
+        });
+
+        /* ---------------- Input: keyboard ---------------- */
+        var KEYMAP = {
+          KeyW: 'gas', ArrowUp: 'gas',
+          KeyS: 'brake', ArrowDown: 'brake',
+          KeyA: 'left', ArrowLeft: 'left',
+          KeyD: 'right', ArrowRight: 'right',
+          Space: 'handbrake'
+        };
+        window.addEventListener('keydown', function (e) {
+          if (e.target === addressInput) return;
+          var k = KEYMAP[e.code];
+          if (k) { input[k] = true; syncButtons(); e.preventDefault(); }
+        });
+        window.addEventListener('keyup', function (e) {
+          var k = KEYMAP[e.code];
+          if (k) { input[k] = false; syncButtons(); e.preventDefault(); }
+        });
+        window.addEventListener('blur', function () {
+          input.gas = input.brake = input.left = input.right = input.handbrake = false;
+          syncButtons();
+        });
+
+        /* ---------------- Input: touch buttons ---------------- */
+        var btnEls = {
+          gas: document.getElementById('btn-gas'),
+          brake: document.getElementById('btn-brake'),
+          left: document.getElementById('btn-left'),
+          right: document.getElementById('btn-right'),
+          handbrake: document.getElementById('btn-handbrake')
+        };
+        function syncButtons() {
+          for (var k in btnEls) {
+            if (Object.prototype.hasOwnProperty.call(btnEls, k)) {
+              btnEls[k].classList.toggle('active', !!input[k]);
+            }
+          }
+        }
+        Object.keys(btnEls).forEach(function (k) {
+          var el = btnEls[k];
+          function on(e) { e.preventDefault(); input[k] = true; syncButtons(); }
+          function off(e) { e.preventDefault(); input[k] = false; syncButtons(); }
+          el.addEventListener('pointerdown', on);
+          el.addEventListener('pointerup', off);
+          el.addEventListener('pointercancel', off);
+          el.addEventListener('pointerleave', off);
+          el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+        });
+
+        /* ---------------- Speedometer ---------------- */
+        var speedNum = document.getElementById('speed-num');
+        var speedKmh = document.getElementById('speed-kmh');
+        var speedBar = document.getElementById('speed-bar');
+        var headingLabel = document.getElementById('heading-label');
+        var CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+        function updateSpeedo() {
+          var mph = Math.abs(car.speed) * 2.23694;
+          speedNum.textContent = String(Math.round(mph));
+          speedKmh.textContent = Math.round(Math.abs(car.speed) * 3.6) + ' km/h' + (car.speed < -0.3 ? ' · R' : '');
+          speedBar.style.width = Math.min(100, mph / 95 * 100) + '%';
+          var h = ((car.heading % 360) + 360) % 360;
+          headingLabel.textContent = CARDINALS[Math.round(h / 45) % 8] + ' ' + Math.round(h) + '°';
+        }
+
+        /* ---------------- Drive loop ---------------- */
+        var last = null;
+        function tick(now) {
+          requestAnimationFrame(tick);
+          if (last === null) { last = now; return; }
+          var dt = Math.min(0.05, (now - last) / 1000);
+          last = now;
+          if (dt <= 0) return;
+
+          /* Acceleration / braking */
+          if (input.handbrake) {
+            var hb = BRAKE_DECEL * 1.4 * dt;
+            car.speed = Math.abs(car.speed) <= hb ? 0 : car.speed - Math.sign(car.speed) * hb;
+          } else if (input.gas) {
+            car.speed = Math.min(MAX_FWD, car.speed + ACCEL * dt * (car.speed < 0 ? 2.2 : 1));
+          } else if (input.brake) {
+            if (car.speed > 0.4) {
+              car.speed = Math.max(0, car.speed - BRAKE_DECEL * dt);
+            } else {
+              car.speed = Math.max(-MAX_REV, car.speed - REV_ACCEL * dt);
+            }
+          } else {
+            /* Rolling drag */
+            var drag = 2.6 * dt + Math.abs(car.speed) * 0.12 * dt;
+            car.speed = Math.abs(car.speed) <= drag ? 0 : car.speed - Math.sign(car.speed) * drag;
+          }
+
+          /* Steering — only bites while moving, gentler at speed */
+          var steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+          if (steer !== 0 && car.speed !== 0) {
+            var grip = Math.min(1, Math.abs(car.speed) / 7);
+            var agility = 1 - Math.min(0.5, Math.abs(car.speed) / MAX_FWD * 0.5);
+            car.heading += steer * 105 * grip * agility * dt * Math.sign(car.speed);
+            car.heading = ((car.heading % 360) + 360) % 360;
+          }
+
+          /* Move */
+          if (car.speed !== 0) {
+            var hRad = car.heading * Math.PI / 180;
+            var dist = car.speed * dt;
+            var east = Math.sin(hRad) * dist;
+            var north = Math.cos(hRad) * dist;
+            car.lat += north / 111320;
+            car.lng += east / (111320 * Math.cos(car.lat * Math.PI / 180));
+          }
+
+          /* Car geometry + camera */
+          var src = map.getSource('car');
+          if (src) src.setData(carGeoJSON());
+          if (follow) {
+            map.jumpTo({
+              center: [car.lng, car.lat],
+              bearing: viewMode === '3d' ? car.heading : 0,
+              pitch: viewMode === '3d' ? 62 : 0
+            });
+          }
+          updateSpeedo();
+        }
+        requestAnimationFrame(tick);
+        updateSpeedo();
+        setStatus('Car is in downtown Arlington. Type an address or pick a place, then drive.');
+      })();
+    </script>
+  </body>
+</html>
